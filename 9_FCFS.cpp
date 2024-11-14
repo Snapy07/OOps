@@ -1,134 +1,119 @@
 #include <iostream>
-#include <pthread.h>
-#include <unistd.h>
 #include <vector>
+#include <string>
+#include <iomanip>
 
 using namespace std;
 
-// Shared buffer, mutex, and condition variables
-vector<int> buffer;
-pthread_mutex_t mtx;  // Mutex for synchronizing access to buffer
-pthread_cond_t cv_producer, cv_consumer;  // Condition variables for producer and consumer
-
-// Helper function to print the current state of the buffer
-void print_buffer() {
-    cout << "Buffer state: [";
-    for (size_t i = 0; i < buffer.size(); ++i) {
-        cout << buffer[i];
-        if (i != buffer.size() - 1) {
-            cout << ", ";
+// Function to find the index of a process in the process list
+int getProcessIndex(const vector<string>& procs, const string& proc) {
+    for (int i = 0; i < procs.size(); i++) {
+        if (procs[i] == proc) {
+            return i;
         }
     }
-    cout << "]" << endl;
+    return -1;
 }
 
-// Producer function
-void* producer(void* arg) {
-    int* params = (int*)arg;  // Retrieve producer parameters
-    int num_operations = params[0];  // Number of items to produce
-    int buffer_size = params[1];  // Maximum buffer capacity
+// Scheduling function
+void solve(vector<string>& procs, vector<string>& rq, vector<int>& at, vector<int>& bt, vector<int>& ct) {
+    int time = 0;  // Current time in the simulation
+    int i = 0;  // Index for processes arriving in the ready queue
+    int n = procs.size();  // Number of processes
+    vector<int> tat(n), wt(n);  // Vectors to store Turnaround Time and Waiting Time for each process
 
-    for (int i = 0; i < num_operations; ++i) {
-        pthread_mutex_lock(&mtx);  // Lock mutex to enter critical section
+    // Table header for process scheduling
+    cout << "Time\tReady Queue\tRunning Process\tStatus" << endl;
 
-        // Wait if buffer is full
-        cout << "Producer waiting to produce item " << i + 1 << endl;
-        while (buffer.size() >= buffer_size) {
-            pthread_cond_wait(&cv_producer, &mtx);  // Wait for buffer space
+    while (i < n || !rq.empty()) {  // Loop until all processes are completed
+        // Check for processes that have arrived and add them to the ready queue
+        while (i < n && at[i] <= time) {
+            int index = -1;  // Insertion index in the ready queue for SJF order
+            for (int j = 0; j < rq.size(); j++) {
+                // Insert process in the ready queue based on arrival time or burst time
+                if (at[i] < at[getProcessIndex(procs, rq[j])] || 
+                   (at[i] == at[getProcessIndex(procs, rq[j])] && bt[i] < bt[getProcessIndex(procs, rq[j])])) {
+                    index = j;
+                    break;
+                }
+            }
+            // Insert the process into the ready queue in SJF order
+            if (index == -1) {
+                rq.push_back(procs[i]);
+            } else {
+                rq.insert(rq.begin() + index, procs[i]);
+            }
+            i++;
         }
-        cout << "Producer entered critical section to produce item " << i + 1 << endl;
 
-        // Produce an item and add it to the buffer
-        int item = i + 1;
-        buffer.push_back(item);
-        cout << "Producer produced item " << item << " at position " << buffer.size() - 1 << endl;
+        // Display ready queue and process status
+        cout << time << "\t";
+        for (const auto& p : rq) cout << p << " ";
+        cout << "\t\t";
 
-        // Print the current state of the buffer
-        print_buffer();
+        // Process the first process in the ready queue
+        if (!rq.empty()) {
+            string current_process = rq.front();  // Get the process at the front of the queue
+            int index = getProcessIndex(procs, current_process);
+            cout << current_process << "\t\t";
 
-        // Notify consumer that there's an item to consume
-        pthread_cond_signal(&cv_consumer);
+            time += bt[index];  // Increment time by the burst time of the current process
+            ct[index] = time;  // Set the completion time for the process
+            tat[index] = ct[index] - at[index];  // Calculate turnaround time
+            wt[index] = tat[index] - bt[index];  // Calculate waiting time
+            cout << current_process << " completed" << endl;
 
-        cout << "Producer exited critical section after producing item " << item << endl;
-
-        pthread_mutex_unlock(&mtx);  // Unlock mutex after producing
-
-        // Simulate production delay
-        usleep(100000);  // 100 ms delay
+            rq.erase(rq.begin());  // Remove the completed process from the ready queue
+        } else {
+            cout << "Idle" << "\t\tNo process completed" << endl;
+            time++;  // If no process is ready, increment time
+        }
     }
 
-    return nullptr;
-}
-
-// Consumer function
-void* consumer(void* arg) {
-    int* num_operations = (int*)arg;  // Retrieve number of items to consume
-    int operations = *num_operations;
-
-    for (int i = 0; i < operations; ++i) {
-        pthread_mutex_lock(&mtx);  // Lock mutex to enter critical section
-
-        // Wait if buffer is empty
-        cout << "Consumer waiting to consume" << endl;
-        while (buffer.empty()) {
-            pthread_cond_wait(&cv_consumer, &mtx);  // Wait for items in buffer
-        }
-        cout << "Consumer entered critical section to consume" << endl;
-
-        // Consume the first item in the buffer
-        int item = buffer.front();
-        buffer.erase(buffer.begin());
-        cout << "Consumer consumed item " << item << endl;
-
-        // Print the current state of the buffer
-        print_buffer();
-
-        // Notify producer that there's space in the buffer
-        pthread_cond_signal(&cv_producer);
-
-        cout << "Consumer exited critical section after consuming item " << item << endl;
-
-        pthread_mutex_unlock(&mtx);  // Unlock mutex after consuming
-
-        // Simulate consumption delay
-        usleep(200000);  // 200 ms delay
+    // Display the final table of AT, BT, CT, TAT, WT
+    cout << "\nProcess\tAT\tBT\tCT\tTAT\tWT\n";
+    for (int j = 0; j < n; ++j) {
+        cout << procs[j] << "\t" << at[j] << "\t" << bt[j] << "\t" << ct[j] << "\t" << tat[j] << "\t" << wt[j] << endl;
     }
-
-    return nullptr;
 }
 
 int main() {
-    int num_producer_ops, num_consumer_ops, buffer_size;
+    vector<string> rq, procs;  // Ready queue and process names
+    vector<int> at, bt, ct;  // Arrival times, burst times, and completion times
+    int num;
 
-    // Input for the number of operations and buffer size
-    cout << "Enter number of producer operations: ";
-    cin >> num_producer_ops;
-    cout << "Enter number of consumer operations: ";
-    cin >> num_consumer_ops;
-    cout << "Enter buffer size: ";
-    cin >> buffer_size;
+    // User input for number of processes and process details
+    cout << "Enter the total number of processes: ";  // Example: 3 or 4 
+    cin >> num;
 
-    // Initialize mutex and condition variables
-    pthread_mutex_init(&mtx, nullptr);
-    pthread_cond_init(&cv_producer, nullptr);
-    pthread_cond_init(&cv_consumer, nullptr);
+    // Input for process names
+    cout << "Enter process names: ";  // Example: P1 P2 P3 OR P1 P2 P3 P4
+    for (int i = 0; i < num; i++) {
+        string str;
+        cin >> str;
+        procs.push_back(str);
+    }
 
-    // Prepare parameters for the producer thread
-    int producer_params[2] = {num_producer_ops, buffer_size};
+    // Input for arrival times of each process
+    cout << "Enter arrival times: ";  // Example: 0 1 2 (for each process)
+    for (int i = 0; i < num; i++) {
+        int ele;
+        cin >> ele;
+        at.push_back(ele);
+    }
 
-    // Create producer and consumer threads
-    pthread_t producer_thread, consumer_thread;
-    pthread_create(&producer_thread, nullptr, producer, (void*)producer_params);
-    pthread_create(&consumer_thread, nullptr, consumer, (void*)&num_consumer_ops);
+    // Input for burst times of each process
+    cout << "Enter burst times: ";  // Example: 5 3 1 (for each process)
+    for (int i = 0; i < num; i++) {
+        int ele;
+        cin >> ele;
+        bt.push_back(ele);
+    }
 
-    // Wait for threads to finish execution
-    pthread_join(producer_thread, nullptr);
-    pthread_join(consumer_thread, nullptr);
+    // Initialize completion times to zero for each process
+    ct.resize(num, 0);
 
-    // Destroy mutex and condition variables after threads are done
-    pthread_mutex_destroy(&mtx);
-    pthread_cond_destroy(&cv_producer);
-    pthread_cond_destroy(&cv_consumer);
-
+    // Call the scheduling function to process the tasks
+    solve(procs, rq, at, bt, ct);
     return 0;
 }
